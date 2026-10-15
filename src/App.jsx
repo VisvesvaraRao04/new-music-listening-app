@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 
-const getServerUrl = () => localStorage.getItem('tt_server_url') || import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'
-const getJiosaavnUrl = () => localStorage.getItem('tt_jiosaavn_url') || import.meta.env.VITE_JIOSAAVN_API_URL || 'http://127.0.0.1:8000'
+const getServerUrl = () => {
+  if (import.meta.env.VITE_SERVER_URL) return import.meta.env.VITE_SERVER_URL
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:3001'
+    }
+    return window.location.origin
+  }
+  return 'http://localhost:3001'
+}
+const getJiosaavnUrl = () => import.meta.env.VITE_JIOSAAVN_API_URL || 'http://127.0.0.1:8000'
 const JAMENDO_ID = import.meta.env.VITE_JAMENDO_CLIENT_ID
 const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY
 const SAYA_API_URL = import.meta.env.VITE_SAYA_API_URL || 'http://127.0.0.1:8787'
@@ -250,11 +259,7 @@ export default function App() {
     })
 
     s.on('connect_error', () => {
-      if (window.location.protocol === 'https:' && currentServer.startsWith('http://')) {
-        setError(`Browsers block connecting to ${currentServer} from HTTPS. Configure your backend URL below.`)
-      } else {
-        setError(`Could not connect to server at ${currentServer}.`)
-      }
+      setError(`Could not connect to room server at ${currentServer}.`)
     })
 
     s.on('connect', () => {
@@ -487,26 +492,7 @@ export default function App() {
                   Join
                 </button>
               </div>
-              {error && (
-                <div style={{ marginTop: '12px' }}>
-                  <p className="error-text">{error}</p>
-                  <button
-                    type="button"
-                    className="secondary"
-                    style={{ marginTop: '8px', width: '100%', height: '36px', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    onClick={() => {
-                      const cur = getServerUrl()
-                      const next = prompt('Enter your deployed backend server URL (e.g. https://your-server.onrender.com):', cur)
-                      if (next && next.trim()) {
-                        localStorage.setItem('tt_server_url', next.trim())
-                        window.location.reload()
-                      }
-                    }}
-                  >
-                    ⚙️ Set Deployed Backend URL
-                  </button>
-                </div>
-              )}
+              {error && <p className="error-text">{error}</p>}
             </div>
           </section>
         </div>
