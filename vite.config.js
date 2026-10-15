@@ -4,5 +4,12 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   base: './',
   plugins: [react()],
-  server: { port: 5173, proxy: { '/socket.io': 'http://localhost:3001' } }
+  server: {
+    port: 5173,
+    proxy: {
+      '/socket.io': 'http://localhost:3001',
+      '/song': 'http://localhost:3001',
+      '/api': 'http://localhost:3001'
+    }
+  }
 })

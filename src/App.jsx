@@ -11,7 +11,7 @@ const getServerUrl = () => {
   }
   return 'http://localhost:3001'
 }
-const getJiosaavnUrl = () => import.meta.env.VITE_JIOSAAVN_API_URL || 'http://127.0.0.1:8000'
+const getJiosaavnUrl = () => import.meta.env.VITE_JIOSAAVN_API_URL || getServerUrl()
 const JAMENDO_ID = import.meta.env.VITE_JAMENDO_CLIENT_ID
 const YOUTUBE_API_KEY = import.meta.env.VITE_YOUTUBE_API_KEY
 const SAYA_API_URL = import.meta.env.VITE_SAYA_API_URL || 'http://127.0.0.1:8787'
@@ -381,7 +381,11 @@ export default function App() {
     try {
       let normalized = []
       if (source === 'audius') {
-        const response = await fetch(`${getJiosaavnUrl()}/song/?query=${encodeURIComponent(term.trim())}&lyrics=false&songdata=true`); const items = await response.json()
+        const response = await fetch(`${getJiosaavnUrl()}/song/?query=${encodeURIComponent(term.trim())}&lyrics=false&songdata=true`);
+        if (!response.ok) {
+          throw new Error('Music search request failed. Please try again.')
+        }
+        const items = await response.json()
         normalized = (Array.isArray(items) ? items : []).filter(t => t.media_url).map(t => ({ source: 'jiosaavn', trackId: String(t.id), title: t.song, artist: t.primary_artists || t.singers || 'Unknown artist', audioUrl: t.media_url, imageUrl: t.image, externalUrl: t.perma_url }))
       } else if (source === 'youtube') {
         if (!YOUTUBE_API_KEY) throw new Error('YouTube search key is missing. Add VITE_YOUTUBE_API_KEY to .env and restart Vite.')

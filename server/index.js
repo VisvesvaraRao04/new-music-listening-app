@@ -20,12 +20,193 @@ const io = new Server(server, {
   }
 })
 
+// CORS middleware for cross-origin requests
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*')
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept')
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200)
+  }
+  next()
+})
+
 const rooms = new Map()
 const roomCleanupTimers = new Map()
+
+// JioSaavn DES cipher key & decryption setup
+const SAAVN_KEY = Buffer.from('38346591')
+const SAAVN_TRIPLE_KEY = Buffer.concat([SAAVN_KEY, SAAVN_KEY, SAAVN_KEY])
+
+function decryptSaavnUrl(encUrl) {
+  if (!encUrl) return ''
+  try {
+    const decipher = crypto.createDecipheriv('des-ede3', SAAVN_TRIPLE_KEY, null)
+    let dec = decipher.update(encUrl.trim(), 'base64', 'utf8')
+    dec += decipher.final('utf8')
+    return dec.replace('_96.mp4', '_320.mp4')
+  } catch (err) {
+    return ''
+  }
+}
+
+function cleanHtml(str) {
+  if (!str) return ''
+  return String(str)
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+}
+
+async function searchSongs(query) {
+  if (!query || !query.trim()) return []
+  const q = query.trim()
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  }
+
+  // Strategy 1: JioSaavn search.getResults (single-request with full metadata)
+  try {
+    const url = `https://www.jiosaavn.com/api.php?__call=search.getResults&_format=json&_marker=0&cc=in&p=1&n=20&q=${encodeURIComponent(q)}`
+    const res = await fetch(url, { headers })
+    if (res.ok) {
+      const data = await res.json()
+      if (Array.isArray(data.results) && data.results.length > 0) {
+        const songs = data.results.map(s => {
+          let media_url = decryptSaavnUrl(s.encrypted_media_url)
+          if (s['320kbps'] !== 'true' && media_url) {
+            media_url = media_url.replace('_320.mp4', '_160.mp4')
+          }
+          return {
+            id: s.id,
+            song: cleanHtml(s.song || s.title || ''),
+            primary_artists: cleanHtml(s.primary_artists || s.singers || ''),
+            singers: cleanHtml(s.singers || ''),
+            media_url,
+            image: (s.image || '').replace('150x150', '500x500'),
+            perma_url: s.perma_url || ''
+          }
+        }).filter(s => Boolean(s.media_url))
+
+        if (songs.length > 0) return songs
+      }
+    }
+  } catch (e) {
+    console.error('JioSaavn search.getResults error:', e.message)
+  }
+
+  // Strategy 2: JioSaavn autocomplete.get + song.getDetails (bulk IDs)
+  try {
+    const autoUrl = `https://www.jiosaavn.com/api.php?__call=autocomplete.get&_format=json&_marker=0&cc=in&includeMetaTags=1&query=${encodeURIComponent(q)}`
+    const autoRes = await fetch(autoUrl, { headers })
+    if (autoRes.ok) {
+      const autoData = await autoRes.json()
+      const songList = autoData?.songs?.data || []
+      if (songList.length > 0) {
+        const ids = songList.map(s => s.id).filter(Boolean).join(',')
+        const detUrl = `https://www.jiosaavn.com/api.php?__call=song.getDetails&cc=in&_marker=0%3F_marker%3D0&_format=json&pids=${encodeURIComponent(ids)}`
+        const detRes = await fetch(detUrl, { headers })
+        if (detRes.ok) {
+          const songMap = await detRes.json()
+          const songs = Object.values(songMap).map(s => {
+            let media_url = decryptSaavnUrl(s.encrypted_media_url)
+            if (s['320kbps'] !== 'true' && media_url) {
+              media_url = media_url.replace('_320.mp4', '_160.mp4')
+            }
+            return {
+              id: s.id,
+              song: cleanHtml(s.song || s.title || ''),
+              primary_artists: cleanHtml(s.primary_artists || s.singers || ''),
+              singers: cleanHtml(s.singers || ''),
+              media_url,
+              image: (s.image || '').replace('150x150', '500x500'),
+              perma_url: s.perma_url || ''
+            }
+          }).filter(s => Boolean(s.media_url))
+
+          if (songs.length > 0) return songs
+        }
+      }
+    }
+  } catch (e) {
+    console.error('JioSaavn autocomplete error:', e.message)
+  }
+
+  // Strategy 3: iTunes Search API fallback (reliable global fallback)
+  try {
+    const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&media=music&limit=20`
+    const itunesRes = await fetch(itunesUrl)
+    if (itunesRes.ok) {
+      const itunesData = await itunesRes.json()
+      if (Array.isArray(itunesData.results)) {
+        return itunesData.results.map(item => ({
+          id: String(item.trackId),
+          song: item.trackName,
+          primary_artists: item.artistName || '',
+          singers: item.artistName || '',
+          media_url: item.previewUrl,
+          image: (item.artworkUrl100 || '').replace('100x100bb', '600x600bb'),
+          perma_url: item.trackViewUrl || ''
+        })).filter(s => Boolean(s.media_url))
+      }
+    }
+  } catch (e) {
+    console.error('iTunes fallback error:', e.message)
+  }
+
+  return []
+}
 
 // Health check
 app.get('/health', (_req, res) => {
   res.json({ ok: true, rooms: rooms.size })
+})
+
+// Music search endpoint (compatible with both /song and /api/song)
+app.get(['/song', '/song/', '/api/song', '/api/song/', '/api/search'], async (req, res) => {
+  const query = req.query.query || req.query.q || req.query.term || ''
+  if (!query.trim()) return res.json([])
+  try {
+    const results = await searchSongs(query)
+    res.json(results)
+  } catch (err) {
+    console.error('Search endpoint error:', err.message)
+    res.status(500).json({ error: 'Failed to search songs' })
+  }
+})
+
+// Single song details endpoint
+app.get(['/song/get', '/api/song/get'], async (req, res) => {
+  const songId = req.query.song_id || req.query.id
+  if (!songId) return res.status(400).json({ error: 'Song ID is required' })
+  try {
+    const url = `https://www.jiosaavn.com/api.php?__call=song.getDetails&cc=in&_marker=0%3F_marker%3D0&_format=json&pids=${encodeURIComponent(songId)}`
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    })
+    const data = await response.json()
+    const songData = data[songId]
+    if (!songData) return res.status(404).json({ error: 'Song not found' })
+    let media_url = decryptSaavnUrl(songData.encrypted_media_url)
+    if (songData['320kbps'] !== 'true' && media_url) {
+      media_url = media_url.replace('_320.mp4', '_160.mp4')
+    }
+    res.json({
+      id: songData.id,
+      song: cleanHtml(songData.song || songData.title),
+      primary_artists: cleanHtml(songData.primary_artists || songData.singers),
+      singers: cleanHtml(songData.singers),
+      media_url,
+      image: (songData.image || '').replace('150x150', '500x500'),
+      perma_url: songData.perma_url || ''
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
 })
 
 // Serve the frontend if the production build exists
@@ -36,7 +217,9 @@ if (fs.existsSync(distPath)) {
   app.get('/{*splat}', (req, res, next) => {
     if (
       req.path.startsWith('/health') ||
-      req.path.startsWith('/socket.io')
+      req.path.startsWith('/socket.io') ||
+      req.path.startsWith('/song') ||
+      req.path.startsWith('/api')
     ) {
       return next()
     }
