@@ -2,6 +2,12 @@ import express from 'express'
 import http from 'http'
 import { Server } from 'socket.io'
 import crypto from 'crypto'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import fs from 'fs'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const distPath = path.join(__dirname, '../dist')
 
 const app = express()
 const server = http.createServer(app)
@@ -9,7 +15,16 @@ const io = new Server(server, { cors: { origin: '*' } })
 const rooms = new Map()
 
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }))
-app.get('/', (_req, res) => res.send('TogetherTunes server is running'))
+
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath))
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/health') || req.path.startsWith('/socket.io')) return next()
+    res.sendFile(path.join(distPath, 'index.html'))
+  })
+} else {
+  app.get('/', (_req, res) => res.send('TogetherTunes server is running'))
+}
 
 const roomCode = () => crypto.randomBytes(3).toString('hex').toUpperCase()
 const getRoom = (code, name = 'Listening room', hostId = null) => rooms.get(code) || { code, name, hostId, queue: [], currentIndex: 0, isPlaying: false, currentTime: 0, updatedAt: Date.now(), users: new Map(), messages: [], suggestions: [] }
