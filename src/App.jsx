@@ -48,6 +48,16 @@ export default function App() {
   const [nameModal, setNameModal] = useState({ open: false, action: 'room:join', code: '', title: '', subtitle: '' })
   const [modalInputName, setModalInputName] = useState('')
   const [showExitConfirm, setShowExitConfirm] = useState(false)
+  const [roomNotification, setRoomNotification] = useState(null)
+  const notifTimer = useRef(null)
+
+  const showRoomNotification = (notif) => {
+    if (notifTimer.current) clearTimeout(notifTimer.current)
+    setRoomNotification(notif)
+    notifTimer.current = setTimeout(() => {
+      setRoomNotification(null)
+    }, 4500)
+  }
   const [isScrubbing, setIsScrubbing] = useState(false)
   const [scrubTime, setScrubTime] = useState(0)
 
@@ -258,6 +268,26 @@ export default function App() {
       })
     })
 
+    s.on('room:user_left', data => {
+      if (data?.name) {
+        showRoomNotification({
+          type: 'leave',
+          text: `${data.name} left the room`,
+          count: data.count
+        })
+      }
+    })
+
+    s.on('room:user_joined', data => {
+      if (data?.name && data.name !== activeName) {
+        showRoomNotification({
+          type: 'join',
+          text: `${data.name} joined the room`,
+          count: data.count
+        })
+      }
+    })
+
     s.on('connect_error', () => {
       setError(`Could not connect to room server at ${currentServer}.`)
     })
@@ -411,8 +441,11 @@ export default function App() {
 
   // Modal Component for asking user name when joining
   const NameModalElement = nameModal.open && (
-    <div className="name-modal-overlay">
-      <div className="name-modal">
+    <div
+      className="name-modal-overlay"
+      onClick={() => setNameModal({ open: false, action: '', code: '', title: '', subtitle: '' })}
+    >
+      <div className="name-modal" onClick={e => e.stopPropagation()}>
         <h2>{nameModal.title}</h2>
         <p>{nameModal.subtitle}</p>
         <form onSubmit={submitNameModal}>
@@ -423,15 +456,13 @@ export default function App() {
             placeholder="Your name"
           />
           <div className="name-modal-actions">
-            {screen === 'home' && (
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setNameModal({ open: false, action: '', code: '', title: '', subtitle: '' })}
-              >
-                Cancel
-              </button>
-            )}
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setNameModal({ open: false, action: '', code: '', title: '', subtitle: '' })}
+            >
+              Cancel
+            </button>
             <button type="submit" className="primary" disabled={!modalInputName.trim()}>
               Join Room <span>→</span>
             </button>
@@ -441,129 +472,173 @@ export default function App() {
     </div>
   )
 
+  // Exit Room confirmation modal
+  const ExitModalElement = showExitConfirm && (
+    <div className="name-modal-overlay" onClick={() => setShowExitConfirm(false)}>
+      <div className="name-modal" onClick={e => e.stopPropagation()}>
+        <h2>Exit Listening Room?</h2>
+        <p>Are you sure you want to leave <strong>{room.name || 'this room'}</strong>? Your music sync and shared room session will stop.</p>
+        <div className="name-modal-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setShowExitConfirm(false)}
+          >
+            Stay in room
+          </button>
+          <button
+            type="button"
+            className="primary danger"
+            onClick={() => {
+              setShowExitConfirm(false)
+              leaveRoom()
+            }}
+          >
+            Exit Room <span>→</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
   if (screen === 'home') {
     return (
-      <main className="landing">
+      <>
         {NameModalElement}
-        <div className="landing-inner">
-          <header className="brandbar">
-            <div className="brand">
-              <span className="brand-mark">♫</span>
-              <span>TogetherTunes</span>
-            </div>
-            <span className="eyebrow">Shared listening rooms</span>
-          </header>
-          <section className="landing-grid">
-            <div className="landing-copy">
-              <p className="eyebrow accent">LONG-DISTANCE LISTENING</p>
-              <h1>One playlist.<br /><em>Two places.</em></h1>
-              <p>Make the distance feel smaller. Start a room, invite your person, and listen to every song in perfect time.</p>
-              <div className="feature-row">
-                <span>✦ Live sync</span>
-                <span>✦ Room chat</span>
-                <span>✦ Free music</span>
+        {ExitModalElement}
+        <main className="landing">
+          <div className="landing-inner">
+            <header className="brandbar">
+              <div className="brand">
+                <span className="brand-mark">♫</span>
+                <span>TogetherTunes</span>
               </div>
-            </div>
-            <div className="join-card">
-              <label>Your name</label>
-              <input
-                value={person}
-                onChange={e => {
-                  setPerson(e.target.value)
-                  localStorage.setItem('tt_person', e.target.value)
-                }}
-                placeholder="What should we call you?"
-              />
-              <label>Give your room a mood</label>
-              <input
-                value={roomName}
-                onChange={e => setRoomName(e.target.value)}
-                placeholder="Late night drive"
-              />
-              <button className="primary wide" onClick={handleCreateRoom}>
-                Create a listening room <span>→</span>
-              </button>
-              <div className="divider">
-                <span>or join a friend</span>
+              <span className="eyebrow">Shared listening rooms</span>
+            </header>
+            <section className="landing-grid">
+              <div className="landing-copy">
+                <p className="eyebrow accent">LONG-DISTANCE LISTENING</p>
+                <h1>One playlist.<br /><em>Two places.</em></h1>
+                <p>Make the distance feel smaller. Start a room, invite your person, and listen to every song in perfect time.</p>
+                <div className="feature-row">
+                  <span>✦ Live sync</span>
+                  <span>✦ Room chat</span>
+                  <span>✦ Free music</span>
+                </div>
               </div>
-              <div className="join-row">
+              <div className="join-card">
+                <label>Your name</label>
                 <input
-                  value={joinCode}
-                  onChange={e => setJoinCode(e.target.value.toUpperCase())}
-                  placeholder="ROOM CODE"
+                  value={person}
+                  onChange={e => {
+                    setPerson(e.target.value)
+                    localStorage.setItem('tt_person', e.target.value)
+                  }}
+                  placeholder="What should we call you?"
                 />
-                <button className="secondary" onClick={handleJoinRoom}>
-                  Join
+                <label>Give your room a mood</label>
+                <input
+                  value={roomName}
+                  onChange={e => setRoomName(e.target.value)}
+                  placeholder="Late night drive"
+                />
+                <button className="primary wide" onClick={handleCreateRoom}>
+                  Create a listening room <span>→</span>
                 </button>
+                <div className="divider">
+                  <span>or join a friend</span>
+                </div>
+                <div className="join-row">
+                  <input
+                    value={joinCode}
+                    onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                    placeholder="ROOM CODE"
+                  />
+                  <button className="secondary" onClick={handleJoinRoom}>
+                    Join
+                  </button>
+                </div>
+                {error && <p className="error-text">{error}</p>}
               </div>
-              {error && <p className="error-text">{error}</p>}
-            </div>
-          </section>
-        </div>
-      </main>
+            </section>
+          </div>
+        </main>
+      </>
     )
   }
 
   const isHost = room.hostId === socket.current?.id; const artwork = artFor(current)
   return (
-    <main className="room-app" style={artwork ? { '--art': `url(${artwork})` } : {}}>
+    <>
       {NameModalElement}
-      {showExitConfirm && (
-        <div className="name-modal-overlay" onClick={() => setShowExitConfirm(false)}>
-          <div className="name-modal" onClick={e => e.stopPropagation()}>
-            <h2>Exit Listening Room?</h2>
-            <p>Are you sure you want to leave <strong>{room.name || 'this room'}</strong>? Your music sync and shared room session will stop.</p>
-            <div className="name-modal-actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setShowExitConfirm(false)}
-              >
-                Stay in room
-              </button>
-              <button
-                type="button"
-                className="primary danger"
-                onClick={() => {
-                  setShowExitConfirm(false)
-                  leaveRoom()
-                }}
-              >
-                Exit Room <span>→</span>
-              </button>
+      {ExitModalElement}
+      <main className="room-app" style={artwork ? { '--art': `url(${artwork})` } : {}}>
+        <div className="room-backdrop" />
+        <div className="room-shell">
+          {roomNotification && (
+            <div className={`room-banner ${roomNotification.type}`}>
+              <span className="banner-icon">{roomNotification.type === 'leave' ? '👋' : '🎉'}</span>
+              <div className="banner-text">
+                <strong>{roomNotification.text}</strong>
+                {Number.isFinite(roomNotification.count) && (
+                  <span className="banner-count">({roomNotification.count} {roomNotification.count === 1 ? 'person' : 'people'} in room)</span>
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
-      <div className="room-backdrop" />
-      <div className="room-shell">
-        <header className="room-topbar">
-          <button className="exit-btn" onClick={() => setShowExitConfirm(true)} title="Exit listening room">
-            <span>←</span> Exit
-          </button>
-          <div className="room-title">
-            <span className="eyebrow">LISTENING ROOM</span>
-            <strong>{room.name}</strong>
-          </div>
-          <button className="icon-button" onClick={() => setShowTools(!showTools)}>•••</button>
-        </header>
+          )}
 
-        <div className="room-code-line">
-          <span>{room.users.length} listening together</span>
-          <button onClick={invite}>{copied ? 'Link copied' : `Invite · ${roomCode}`}</button>
-        </div>
-
-        <section className="hero-player">
-          <div className="hero-art-wrap">
-            <div className="hero-art" style={artwork ? { backgroundImage: `url(${artwork})` } : {}}>
-              {!artwork && <span>♫</span>}
+          <header className="room-topbar">
+            <button className="exit-btn" onClick={() => setShowExitConfirm(true)} title="Exit listening room">
+              <span>←</span> Exit
+            </button>
+            <div className="room-title">
+              <span className="eyebrow">LISTENING ROOM</span>
+              <strong>{room.name}</strong>
             </div>
+            <button className="icon-button" onClick={() => setShowTools(!showTools)}>•••</button>
+          </header>
+
+          <div className="room-code-line">
+            <div className="room-count-badge">
+              <span className="live-dot" />
+              <span><strong>{room.users.length}</strong> {room.users.length === 1 ? 'person in room' : 'people in room'}</span>
+            </div>
+            <button onClick={invite} className="invite-btn">{copied ? 'Link copied' : `Invite · ${roomCode}`}</button>
           </div>
-          <div className="liked-pill">
-            {room.users.slice(0, 3).map(u => <span className="avatar" key={u.id}>{u.name[0]}</span>)}
-            <span>Listening with {room.users[0]?.name || 'your friend'} ♥</span>
-          </div>
-          <div className="track-panel">
+
+          <section className="hero-player">
+            <div className="hero-art-wrap">
+              <div className="hero-art" style={artwork ? { backgroundImage: `url(${artwork})` } : {}}>
+                {!artwork && <span>♫</span>}
+              </div>
+            </div>
+            <div className="liked-pill people-pill">
+              <div className="avatar-stack">
+                {room.users.map(u => (
+                  <span
+                    className={`avatar ${u.id === socket.current?.id ? 'is-self' : ''}`}
+                    key={u.id}
+                    title={`${u.name}${u.id === room.hostId ? ' (Host)' : ''}${u.id === socket.current?.id ? ' (You)' : ''}`}
+                  >
+                    {u.name ? u.name[0].toUpperCase() : '?'}
+                  </span>
+                ))}
+              </div>
+              <div className="people-names-wrap">
+                <span className="people-names-label">{room.users.length} in room:</span>
+                <span className="people-names-list">
+                  {room.users.map((u, i) => (
+                    <span key={u.id} className="person-tag">
+                      <strong className={u.id === socket.current?.id ? 'highlight-self' : ''}>{u.name}</strong>
+                      {u.id === room.hostId && <span className="badge-role host">Host</span>}
+                      {u.id === socket.current?.id && <span className="badge-role you">You</span>}
+                      {i < room.users.length - 1 && <span className="separator">, </span>}
+                    </span>
+                  ))}
+                </span>
+              </div>
+            </div>
+            <div className="track-panel">
             <div className="track-copy">
               <span className="eyebrow">NOW PLAYING · {current?.source === 'youtube' ? 'YOUTUBE' : current?.source?.toUpperCase() || 'READY'}</span>
               <h2>{current?.title || 'Choose a song to begin'}</h2>
@@ -735,9 +810,15 @@ export default function App() {
             </div>
             <div className="messages">
               {room.messages.map(m => (
-                <div key={m.id}>
-                  <b>{m.name}</b>
-                  <p>{m.text}</p>
+                <div key={m.id} className={m.isSystem ? 'system-msg-row' : ''}>
+                  {m.isSystem ? (
+                    <span className="system-pill">🔔 {m.text}</span>
+                  ) : (
+                    <>
+                      <b>{m.name}</b>
+                      <p>{m.text}</p>
+                    </>
+                  )}
                 </div>
               ))}
               {!room.messages.length && <p className="empty-copy">Say hello 👋</p>}
@@ -758,5 +839,6 @@ export default function App() {
         </button>
       </div>
     </main>
+    </>
   )
 }

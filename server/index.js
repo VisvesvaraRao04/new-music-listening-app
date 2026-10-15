@@ -293,6 +293,8 @@ function handleLeave(socket) {
     return
   }
 
+  const leavingUser = room.users.get(socket.id) || { id: socket.id, name: socket.data.name || 'A listener' }
+
   socket.leave(code)
   socket.data.roomCode = null
 
@@ -302,6 +304,23 @@ function handleLeave(socket) {
     if (room.hostId === socket.id) {
       room.hostId = room.users.keys().next().value
     }
+
+    // Add a system announcement to room chat
+    room.messages.push({
+      id: crypto.randomUUID(),
+      name: 'TogetherTunes',
+      text: `${leavingUser.name} left the room`,
+      at: Date.now(),
+      isSystem: true
+    })
+    room.messages = room.messages.slice(-80)
+
+    // Notify all remaining clients in the room
+    io.to(code).emit('room:user_left', {
+      user: leavingUser,
+      name: leavingUser.name,
+      count: room.users.size
+    })
 
     broadcastState(code)
   } else {
@@ -332,6 +351,7 @@ function join(socket, code, name, done = () => {}) {
   }
 
   const room = rooms.get(code)
+  const isNewJoin = !room.users.has(socket.id)
 
   socket.join(code)
   socket.data.roomCode = code
@@ -346,6 +366,23 @@ function join(socket, code, name, done = () => {}) {
     id: socket.id,
     name: socket.data.name
   })
+
+  if (isNewJoin) {
+    room.messages.push({
+      id: crypto.randomUUID(),
+      name: 'TogetherTunes',
+      text: `${socket.data.name} joined the room`,
+      at: Date.now(),
+      isSystem: true
+    })
+    room.messages = room.messages.slice(-80)
+
+    socket.to(code).emit('room:user_joined', {
+      user: { id: socket.id, name: socket.data.name },
+      name: socket.data.name,
+      count: room.users.size
+    })
+  }
 
   done({
     code,
