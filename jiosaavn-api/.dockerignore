@@ -1,0 +1,17 @@
+# Ignore virtual environment directories
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore any local configuration or sensitive files
+.env
+*.log
+*.sqlite
+
+# Ignore the Dockerfile and docker-compose files themselves if not needed in the container
+Dockerfile
+docker-compose.yml
+
+# Ignore the .git directory
+.git/

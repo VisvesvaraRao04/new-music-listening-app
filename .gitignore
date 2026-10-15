@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*.local
+*.zip
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+sayamusicapi/node_modules
+sayamusicapi/.wrangler
